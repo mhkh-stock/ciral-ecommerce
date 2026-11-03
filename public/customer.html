@@ -1,0 +1,32 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ciral — My Account</title><link rel="stylesheet" href="styles.css"></head>
+<body>
+<div class="layout">
+<aside class="sidebar"><div class="logo">🛒 Ciral<span> Customer</span></div>
+<a href="#" class="active" onclick="showTab('orders',this)">My Orders</a>
+<a href="#" onclick="showTab('profile',this)">Profile & Addresses</a>
+<a href="#" onclick="showTab('wishlist',this)">Wishlist</a>
+<a href="#" onclick="showTab('messages',this)">Messages <span id="unreadBadge"></span></a>
+<a href="#" onclick="showTab('password',this)">Change Password</a>
+<a href="index.html">← Back to Store</a></aside>
+<main class="main">
+<div id="loginBox"><h1>Customer Sign In / Register</h1>
+<input id="rName" placeholder="Full name (for register)"><input id="rPhone" placeholder="Phone (optional)">
+<input id="email" placeholder="Email"><input id="pass" type="password" placeholder="Password (8+ characters)">
+<button onclick="login()">Sign In</button> <button class="ghost" onclick="register()">Register as Customer</button>
+<p class="muted">Test customer: customer@ciral.pk / Customer@2026! — change it after first login. Messages are in-site only; no email is sent.</p><p id="loginErr" class="muted"></p></div>
+<div id="panel" style="display:none">
+<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><h1 id="greeting" style="flex:1">My Account</h1><button class="ghost" onclick="logout()">Sign Out</button></div>
+<section id="orders"><h2>My Orders</h2><div id="ordersList"></div><div id="orderDetail"></div></section>
+<section id="profile" style="display:none"><h2>Profile</h2>
+<input id="pName" placeholder="Full name"><input id="pPhone" placeholder="Phone"><button onclick="saveProfile()">Save Profile</button>
+<h3>Addresses</h3><input id="aLabel" placeholder="Label, e.g. Home"><input id="aName" placeholder="Name"><input id="aPhone" placeholder="Phone"><input id="aCity" placeholder="City"><textarea id="aAddr" placeholder="Address"></textarea><button onclick="addAddress()">Add Address</button><div id="addrList"></div></section>
+<section id="wishlist" style="display:none"><h2>Wishlist</h2><div id="wishList"></div></section>
+<section id="messages" style="display:none"><h2>Messages with Support</h2>
+<p class="muted">In-site messaging only — replies appear here, no email is sent.</p>
+<input id="mSubject" placeholder="Subject"><textarea id="mBody" placeholder="Your message to support"></textarea><input id="mOrder" placeholder="Order number (optional)"><button onclick="sendMessage()">Send Message</button><div id="msgList"></div></section>
+<section id="password" style="display:none"><h2>Change Password</h2>
+<input id="cpCurrent" type="password" placeholder="Current password"><input id="cpNew" type="password" placeholder="New password (8+)"><input id="cpConfirm" type="password" placeholder="Confirm new password"><button onclick="changePassword()">Change Password</button><p id="cpMsg" class="muted"></p></section>
+</div></main></div>
+<div id="toast" class="toast" style="display:none"></div>
+<script src="customer.js"></script></body></html>

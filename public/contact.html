@@ -1,0 +1,9 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ciral — Contact / Support</title><link rel="stylesheet" href="styles.css"></head>
+<body><header><div class="logo">🛒 Ciral<span>.</span></div><div style="flex:1"></div><a class="ghost" href="index.html" style="text-decoration:none;padding:10px 16px">← Back to Store</a></header>
+<main class="main"><h1>Contact / Support</h1>
+<p>Send us a message below. It goes straight to the admin inbox inside Ciral — this is in-site messaging only, no email is sent. If you have an account, sign in on the My Account page and message from there to see replies in your portal.</p>
+<input id="cName" placeholder="Your name"><input id="cSubject" placeholder="Subject"><textarea id="cMsg" placeholder="Your message (at least 10 characters)"></textarea>
+<button onclick="sendContact()">Send Message</button><p id="cResult" class="muted"></p>
+<h2>Support hours</h2><p class="muted">Monday–Saturday, 9am–9pm Pakistan time. We reply to in-site messages as soon as possible.</p></main>
+<script>async function sendContact(){ const b={name:document.getElementById('cName').value,subject:document.getElementById('cSubject').value,message:document.getElementById('cMsg').value}; const r=await fetch('/api/contact',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}); const j=await r.json(); document.getElementById('cResult').textContent=r.ok?('Sent! Message #'+j.id+'. '+j.message):(j.error||'Failed'); }</script></body></html>

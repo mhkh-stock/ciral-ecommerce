@@ -1,0 +1,67 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ciral — Online Shopping in Pakistan</title><link rel="stylesheet" href="styles.css"></head>
+<body>
+<header><div class="logo">🛒 Ciral<span>.</span></div><div style="flex:1"></div>
+<a class="ghost" href="customer.html" style="text-decoration:none;padding:10px 16px">👤 My Account</a>
+<a class="ghost" href="manager.html" style="text-decoration:none;padding:10px 16px">🏪 Seller / Manager</a>
+<button class="ghost" onclick="location.href='admin.html'">Admin Panel</button>
+<button onclick="toggleCart()">Cart (<span id="cartCount">0</span>)</button></header>
+<section class="hero"><h1>Shop quality products, delivered across Pakistan.</h1>
+<p>Clothing, footwear, electronics and home goods — cash on delivery available nationwide.</p>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">
+<a href="#deals" style="text-decoration:none"><button>🔥 Today's Deals</button></a>
+<a href="#best" style="text-decoration:none"><button class="ghost">⭐ Best Sellers</button></a>
+<a href="#categories" style="text-decoration:none"><button class="ghost">🛍️ Shop by Category</button></a>
+</div></section>
+<div class="banner-row" id="banners"></div>
+<div class="filters">
+<div style="position:relative;flex:1">
+<input id="q" placeholder="Search products... try 'kurta' or 'earbuds'" oninput="onSearchInput()" autocomplete="off">
+<div id="suggest" class="suggest" style="display:none"></div>
+</div>
+<select id="cat" onchange="loadProducts()"><option value="">All categories</option><option>Clothing</option><option>Footwear</option><option>Electronics</option><option>Home</option></select>
+<input id="minP" type="number" placeholder="Min PKR" style="max-width:120px" onchange="loadProducts()">
+<input id="maxP" type="number" placeholder="Max PKR" style="max-width:120px" onchange="loadProducts()">
+<select id="sort" onchange="loadProducts()"><option value="">Sort: Featured</option><option value="price_asc">Price: Low to High</option><option value="price_desc">Price: High to Low</option><option value="name">Name A–Z</option><option value="newest">Newest First</option></select>
+</div>
+<h2 id="deals">🔥 Deals of the Day <span class="muted" style="font-size:14px">— real deal prices apply at checkout</span></h2>
+<div class="grid" id="dealsGrid"></div>
+<h2 id="best">⭐ Best Sellers</h2>
+<div class="grid" id="bestGrid"></div>
+<h2 id="new">🆕 New Arrivals</h2>
+<div class="grid" id="newGrid"></div>
+<h2 id="categories">🛍️ Shop by Category</h2>
+<div class="grid" id="catGrid"></div>
+<h2>All Products</h2>
+<div class="grid" id="grid"></div>
+<h2>❤️ Recommended For You</h2>
+<div class="grid" id="recGrid"></div>
+<div id="cartDrawer" class="drawer" style="display:none">
+<h2>Your Cart</h2><div id="cartItems"></div><p id="cartTotal"></p>
+<p class="muted">Coupon: use <b>WELCOME10</b> for 10% off at checkout.</p>
+<button onclick="showCheckout()">Checkout</button> <button class="ghost" onclick="toggleCart()">Close</button>
+</div>
+<div id="checkoutModal" class="modal" style="display:none"><div style="max-width:560px">
+<h2>Checkout</h2><div id="ckSteps" class="steps"><span class="step active">1 Cart</span> <span class="step">2 Details</span> <span class="step">3 Payment</span> <span class="step">4 Confirm</span></div>
+<div id="ckStep1"><div id="ckCart"></div><button onclick="ckGo(2)">Continue to Details →</button></div>
+<div id="ckStep2" style="display:none">
+<input id="cName" placeholder="Full name"><input id="cPhone" placeholder="Phone, e.g. 0300-1234567">
+<input id="cCity" placeholder="City"><textarea id="cAddress" placeholder="Complete delivery address"></textarea>
+<button onclick="ckGo(3)">Continue to Payment →</button> <button class="ghost" onclick="ckGo(1)">Back</button></div>
+<div id="ckStep3" style="display:none">
+<select id="cPay"><option>Cash on Delivery</option><option>Bank Transfer</option><option>JazzCash</option><option>Easypaisa</option></select>
+<input id="cCoupon" placeholder="Coupon code, e.g. WELCOME10">
+<p class="muted">No payment is taken on this website. Choose a payment option and we confirm payment details with you after you place the order. Messaging with support is in-site only — no email is sent.</p>
+<button onclick="ckGo(4)">Review Order →</button> <button class="ghost" onclick="ckGo(2)">Back</button></div>
+<div id="ckStep4" style="display:none"><p id="checkoutTotal"></p><div id="ckReview"></div><button onclick="placeOrder()">Place Order</button> <button class="ghost" onclick="ckGo(3)">Back</button></div>
+<button class="ghost" onclick="hideCheckout()">Cancel</button>
+</div></div>
+<div id="toast" class="toast" style="display:none"></div>
+<div id="detailModal" class="modal" style="display:none"><div style="max-width:640px">
+<div id="detailBody"></div><button class="ghost" onclick="hideDetail()">Close</button>
+</div></div>
+<footer style="text-align:center;padding:24px" class="muted">
+<a href="contact.html">Contact / Support</a> · <a href="info.html#about">About</a> · <a href="info.html#terms">Terms</a> · <a href="info.html#privacy">Privacy</a> · <a href="info.html#faq">FAQ</a> · <a href="customer.html">My Account</a> · <a href="manager.html">Seller / Manager</a>
+<p>Ciral — a Pakistani online store. Payments are options only; no payment is taken on this site. Support messages are in-site only.</p>
+</footer>
+<script src="app.js"></script></body></html>

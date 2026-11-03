@@ -1,0 +1,91 @@
+# Ciral — Online Shopping in Pakistan
+
+A complete e-commerce website, not just a dashboard. Four portals, all with a
+real backend (Node.js 24+, native `node:http` + `node:sqlite`, zero
+dependencies — no `npm install` needed), in the dark-blue glass theme.
+
+## Run locally
+
+```bash
+node --version   # must be 24 or newer
+node server.js
+```
+
+Then open:
+
+- Storefront: http://127.0.0.1:3020/
+- Customer portal: http://127.0.0.1:3020/customer
+- Manager portal: http://127.0.0.1:3020/manager
+- Admin panel: http://127.0.0.1:3020/admin
+- Contact: http://127.0.0.1:3020/contact.html · About/Terms/Privacy/FAQ: /info.html
+
+Port 3020 by default (does not clash with FoodScope on 3010). Override with
+`PORT=3030 node server.js`. SQLite is created at `data/ciral.sqlite` on first
+run and is git-ignored. On a public host (Render, see `render.yaml`) the
+server listens on `$PORT` automatically.
+
+## Portals — what each one does
+
+- **Public storefront:** hero banners linking to real categories/deals,
+  Deals of the Day (real deal prices that actually apply at checkout),
+  Best Sellers (from real order data), New Arrivals, category showcases,
+  recommended products, star ratings from real reviews, search suggestions,
+  product detail with gallery + reviews + related products, price filter +
+  sort, cart drawer, and a 4-step checkout (Cart → Details → Payment →
+  Confirm). Coupon `WELCOME10` = 10% off at checkout.
+- **Customer portal:** register/login, profile, addresses, my orders with a
+  live tracking timeline (Pending → In Route → Shipped → Delivered),
+  order detail, reorder, wishlist, product reviews (one per product per
+  customer), in-site messages to support, change-password. Checkout links
+  to the logged-in customer; guest checkout still works.
+- **Manager portal:** register/login (new managers start **pending** until
+  the admin activates them), products (create/edit/stock), orders (view +
+  move status), customers, sales summary, messages inbox + replies,
+  change-password. Managers CANNOT manage users, audit logs or settings —
+  those routes return 403 for managers, enforced server-side.
+- **Admin portal:** dashboard, metrics, sales chart, shipping tasks, orders
+  board (drag or Move-to), products, customers, reports, audit log,
+  change-password, user management (view/suspend/activate/create
+  managers, staff and customers; approve pending managers), and the full
+  messages inbox with replies. Greeting: "Good morning, M. Hashir".
+
+## Messaging
+
+Fully functional and stored in SQLite: a customer can message support from
+their portal, a product page or an order page; admin and managers see an
+inbox with unread counts, open a thread and reply; the customer sees the
+reply in their portal. **In-site messaging only — no email or SMS is sent
+or claimed.**
+
+## Logins (demo — change after first login)
+
+- Admin: M. Hashir — mhkh3200@gmail.com — Hashir@123 (Change Password in admin panel)
+- Manager (seeded, active): Sara Manager — manager@ciral.pk — Manager@2026!
+- Customer (seeded): Test Customer — customer@ciral.pk — Customer@2026!
+- New manager registrations start pending; the admin activates them under
+  Users in the admin panel.
+
+## Honest limits
+
+- Payment options only: Cash on Delivery, Bank Transfer, JazzCash and
+  Easypaisa are selectable options. **No real payment is processed.**
+- Messaging is in-site only. No email/SMS delivery.
+- Product gallery images are generic category placeholders, not photos of
+  the exact product. Product art in listings is one illustration per product.
+- Seed data is realistic Pakistani data; no "demo"/"AI" labels in the UI.
+- Full feature list: see `FEATURES.md`. Full test run (v3): 61/61 checks
+  pass on a fresh database (see the test flow in the parent report).
+
+## APIs (summary)
+
+- Public: `GET /api/health`, `/api/products` (q, category, min/max price,
+  sort), `/api/products/:id/detail`, `/api/deals`, `/api/best-sellers`,
+  `/api/new-arrivals`, `/api/categories`, `/api/search-suggestions`,
+  `/api/recommendations`, `/api/products/:id/reviews`, `/api/coupons/check`,
+  `POST /api/contact`, `POST /api/checkout` (guest or logged-in, coupon + deal prices applied).
+- Portal auth: `POST /api/auth/register|login|logout`, `GET /api/auth/me`,
+  `POST /api/auth/change-password` (CSRF, current password checked).
+- Customer: `/api/my/profile|orders|orders/:id|orders/:id/reorder`,
+  `/api/addresses`, `/api/wishlist`, `/api/reviews`, `/api/messages`.
+- Manager: `/api/manager/summary|products|orders|orders/:id/status|customers|messages|messages/:id/reply`.
+- Admin: `/api/admin/login|session|logout|stats|orders|orders/:id/status|customers|users|users/:id/status|messages|messages/:id/reply|reports|audit|products|change-password` (admin session + CSRF on mutations).

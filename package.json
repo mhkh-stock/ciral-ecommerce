@@ -1,0 +1,1 @@
+{"description":"Ciral — a complete Pakistani e-commerce store and admin system. Dark dashboard frontend, Node.js + SQLite backend, no external dependencies.","engines":{"node":">=24"},"license":"MIT","main":"server.js","name":"ciral-ecommerce","scripts":{"start":"node server.js"},"version":"1.0.0"}
