@@ -359,7 +359,7 @@ const server = http.createServer(async (req, res) => {
   const p = url.pathname;
   try {
     if (p === '/api/health' && req.method === 'GET') {
-      return json(res, 200, { ok: true, app: 'Ciral', version: '3.0.0',
+      return json(res, 200, { ok: true, app: 'Ciral', version: '3.0.1',
         products: db.prepare('SELECT COUNT(*) c FROM products').get().c,
         orders: db.prepare('SELECT COUNT(*) c FROM orders').get().c,
         customers: db.prepare('SELECT COUNT(*) c FROM customers').get().c,
