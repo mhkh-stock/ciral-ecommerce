@@ -4,9 +4,10 @@
 // runs checks against the live HTTP API, kills the server by PID, exits
 // non-zero if any check fails. All accounts use DUMMY credentials only.
 'use strict';
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
 
@@ -62,6 +63,23 @@ async function main() {
     t('server boots and /api/health answers', up);
     if (!up) { console.log('server stderr:', serverErr); process.exitCode = 1; return; }
 
+    // ---------- writable-dir fallback helper (unit check, real code) ----------
+    // As root, chmod 0555 does not block writes, so the "unwritable" stand-in
+    // is a path under a regular file (ENOTDIR) — it exercises the same
+    // try/catch branch that a read-only app dir takes on a host.
+    {
+      const blocker = path.join(TEST_DIR, 'blocker');
+      fs.writeFileSync(blocker, 'not a directory');
+      const fb = spawnSync('node', ['-e',
+        `const m=require(${JSON.stringify(path.join(__dirname, 'server.js'))});` +
+        `console.log(JSON.stringify({ro:m.writableBase(process.argv[1]),ok:m.writableBase(process.argv[2])}));`,
+        path.join(blocker, 'data'), TEST_DIR],
+      { env: { ...process.env, DB_FILE: path.join(TEST_DIR, 'fallback-probe.sqlite') }, encoding: 'utf8' });
+      let fbj = null; try { fbj = JSON.parse(fb.stdout.trim()); } catch {}
+      t('writableBase falls back to /tmp/ciral when app dir unwritable', fb.status === 0 && !!fbj && fbj.ro === path.join(os.tmpdir(), 'ciral'), fb.stdout + fb.stderr);
+      t('writableBase keeps a writable app dir as-is', !!fbj && fbj.ok === TEST_DIR);
+    }
+
     // ---------- public / health ----------
     let r = await req('/api/health');
     t('health: 200, 16 products, 10 seeded orders', r.status === 200 && r.json.products === 16 && r.json.orders === 10, JSON.stringify(r.json));
@@ -116,6 +134,7 @@ async function main() {
     t('contact rejects message under 10 chars (400)', r.status === 400);
     r = await req('/api/contact', jbody({ name: 'Tester', subject: 'Help', message: 'Hello, I need help with my order please.' }));
     t('contact accepts a valid message (201)', r.status === 201 && typeof r.json.id === 'number');
+    const contactId = r.json.id; // guest contact message (user_id NULL)
 
     // ---------- portal auth ----------
     const custEmail = 'test-cust@example.com', custPw = 'DummyCust123!';
@@ -209,8 +228,10 @@ async function main() {
     r = await req('/api/checkout', jbody({ name: 'Test Customer', phone: '0300-0000001', address: 'House 1', city: 'Lahore', items: [{ product_id: 2, qty: 1 }] }), { headers: {} });
     // (guest checkout above uses no auth; now the authed one)
     r = await req('/api/checkout', { method: 'POST', headers: { Authorization: 'Bearer ' + custTok, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Test Customer', phone: '0300-0000001', address: 'House 1', city: 'Lahore', items: [{ product_id: 2, qty: 1 }] }) });
+    t('logged-in checkout without CSRF returns 403', r.status === 403, JSON.stringify(r.json));
+    r = await req('/api/checkout', { method: 'POST', headers: { Authorization: 'Bearer ' + custTok, 'X-CSRF-Token': custCsrf, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Test Customer', phone: '0300-0000001', address: 'House 1', city: 'Lahore', items: [{ product_id: 2, qty: 1 }] }) });
     const myOrderId = r.json.order_id;
-    t('logged-in checkout creates an order', r.status === 201 && !!myOrderId);
+    t('logged-in checkout with CSRF creates an order', r.status === 201 && !!myOrderId);
     r = await req('/api/my/orders', { headers: { Authorization: 'Bearer ' + custTok } });
     t('my/orders includes the new logged-in order', r.status === 200 && r.json.some(o => o.id === myOrderId));
     r = await req('/api/my/orders/' + myOrderId, { headers: { Authorization: 'Bearer ' + custTok } });
@@ -233,6 +254,13 @@ async function main() {
     r = await req('/api/messages', { method: 'POST', headers: ch(), body: JSON.stringify({ subject: 'Order question', body: 'When will my order arrive?', order_id: myOrderId }) });
     const msgId = r.json.id;
     t('customer message to support posts (201)', r.status === 201 && !!msgId);
+    // Signed-in contact-form message: must carry the customer's id so the
+    // admin's reply reaches their portal inbox (see admin section below).
+    const copts = jbody({ name: 'Test Customer', subject: 'Contact form question', message: 'I wrote in from the contact form while signed in.' });
+    copts.headers.Authorization = 'Bearer ' + custTok;
+    r = await req('/api/contact', copts);
+    t('signed-in contact message posts (201)', r.status === 201 && typeof r.json.id === 'number');
+    const authedContactId = r.json.id;
     r = await req('/api/messages', { method: 'POST', headers: ch(), body: JSON.stringify({ subject: 'Snoop', body: 'Trying another order', order_id: 1 }) });
     t('message linked to another customer\'s order returns 400', r.status === 400, JSON.stringify(r.json));
     r = await req('/api/messages', { headers: ch() });
@@ -273,6 +301,8 @@ async function main() {
     t('manager order status with invalid status returns 400', r.status === 400);
     r = await req('/api/manager/orders/' + myOrderId + '/status', { method: 'PUT', headers: mh(), body: JSON.stringify({ status: 'In Route' }) });
     t('manager moves order to In Route (200)', r.status === 200);
+    r = await req('/api/manager/orders/' + myOrderId + '/status', { method: 'PUT', headers: mh(), body: JSON.stringify({ status: 'Pending' }) });
+    t('manager cannot move order status backwards (400)', r.status === 400, JSON.stringify(r.json));
     r = await req('/api/manager/messages', { headers: mh() });
     t('manager inbox lists customer message', r.status === 200 && r.json.messages.some(m => m.id === msgId));
     r = await req('/api/manager/messages/' + msgId + '/reply', { method: 'POST', headers: mh(), body: JSON.stringify({ body: 'Your order is on its way.' }) });
@@ -285,6 +315,12 @@ async function main() {
     t('admin orders filter by status works', r.status === 200 && r.json.every(o => o.status === 'Pending'));
     r = await req('/api/admin/orders/' + myOrderId + '/status', { method: 'PUT', headers: ah(), body: JSON.stringify({ status: 'Shipped' }) });
     t('admin moves order to Shipped (200)', r.status === 200);
+    r = await req('/api/admin/orders/' + myOrderId + '/status', { method: 'PUT', headers: ah(), body: JSON.stringify({ status: 'In Route' }) });
+    t('admin cannot move order status backwards (400)', r.status === 400, JSON.stringify(r.json));
+    r = await req('/api/admin/orders/' + myOrderId + '/status', { method: 'PUT', headers: ah(), body: JSON.stringify({ status: 'Shipped' }) });
+    t('re-setting the same status is a harmless no-op (200)', r.status === 200);
+    r = await req('/api/admin/orders?status=Shipped', { headers: ah() });
+    t('order still Shipped after rejected backwards move', r.status === 200 && r.json.some(o => o.id === myOrderId));
     r = await req('/api/admin/reports', { headers: ah() });
     t('admin reports returns top products + categories', r.status === 200 && Array.isArray(r.json.top) && Array.isArray(r.json.categories));
     r = await req('/api/admin/audit', { headers: ah() });
@@ -293,6 +329,18 @@ async function main() {
     t('admin inbox lists messages', r.status === 200 && r.json.messages.some(m => m.id === msgId));
     r = await req('/api/admin/messages/' + msgId + '/reply', { method: 'POST', headers: ah(), body: JSON.stringify({ body: 'Admin reply here.' }) });
     t('admin replies to message (201)', r.status === 201);
+    r = await req('/api/admin/messages/' + authedContactId + '/reply', { method: 'POST', headers: ah(), body: JSON.stringify({ body: 'Reply to your contact-form message.' }) });
+    t('admin replies to signed-in contact message (201)', r.status === 201);
+    r = await req('/api/messages', { headers: ch() });
+    t('customer sees the admin reply to their contact message', r.status === 200 && r.json.messages.some(m => m.body === 'Reply to your contact-form message.'));
+    r = await req('/api/admin/messages/' + contactId + '/reply', { method: 'POST', headers: ah(), body: JSON.stringify({ body: 'Guest reply from support.' }) });
+    const guestReplyId = r.json.id;
+    t('admin replies to guest contact message (201)', r.status === 201 && !!guestReplyId);
+    r = await req('/api/admin/messages', { headers: ah() });
+    const guestReply = r.json.messages.find(m => m.id === guestReplyId);
+    t('guest reply is threaded to the original (parent_id), not orphaned', !!guestReply && guestReply.parent_id === contactId, JSON.stringify(guestReply));
+    r = await req('/api/messages', { headers: ch() });
+    t('guest reply does not leak into a customer inbox', r.status === 200 && !r.json.messages.some(m => m.id === guestReplyId));
     r = await req('/api/admin/users', { method: 'POST', headers: ah(), body: JSON.stringify({ name: 'Staff One', email: 'staff1@example.com', password: 'DummyStaff1!', role: 'staff' }) });
     const staffId = r.json.id;
     t('admin creates a staff user (201)', r.status === 201 && !!staffId);

@@ -80,7 +80,7 @@ function hideCheckout(){ document.getElementById('checkoutModal').style.display=
 async function placeOrder(){
   clickSound();
   const body={ name:document.getElementById('cName').value, phone:document.getElementById('cPhone').value, city:document.getElementById('cCity').value, address:document.getElementById('cAddress').value, payment_method:document.getElementById('cPay').value, coupon_code:document.getElementById('cCoupon').value||undefined, items:cart };
-  const headers={'Content-Type':'application/json'}; if(portalToken){ headers.Authorization='Bearer '+portalToken; }
+  const headers={'Content-Type':'application/json'}; if(portalToken){ headers.Authorization='Bearer '+portalToken; if(portalCsrf) headers['X-CSRF-Token']=portalCsrf; }
   const r=await fetch('/api/checkout',{method:'POST',headers,body:JSON.stringify(body)});
   const j=await r.json();
   if(!r.ok) return toast(j.error||'Checkout failed');

@@ -11,9 +11,21 @@ const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
 
 const PORT = Number(process.env.PORT || 3020);
-const DB_FILE = process.env.DB_FILE || path.join(__dirname, 'data', 'ciral.sqlite');
+// Deploy-only writable-location fallback (FoodScope pattern): on a normal
+// run the app dir is writable and data/ciral.sqlite is used exactly as
+// before. Only when the app dir cannot be written (e.g. a read-only
+// container image) does the database move to a writable temp directory.
+// DB_FILE env always wins when set (tests and hosts use it).
+const os = require('node:os');
+function writableBase(dir) {
+  try { fs.accessSync(dir, fs.constants.W_OK); return dir; }
+  catch { return path.join(os.tmpdir(), 'ciral'); }
+}
+const DATA_DIR = process.env.DB_FILE ? path.dirname(process.env.DB_FILE) : writableBase(path.join(__dirname, 'data'));
+const DB_FILE = process.env.DB_FILE || path.join(DATA_DIR, 'ciral.sqlite');
 const PUBLIC_DIR = path.join(__dirname, 'public');
-fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
+fs.mkdirSync(DATA_DIR, { recursive: true });
+if (!process.env.DB_FILE && DATA_DIR !== path.join(__dirname, 'data')) console.log('Ciral data directory (read-only app dir fallback):', DATA_DIR);
 const db = new DatabaseSync(DB_FILE);
 db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL;');
 
@@ -107,6 +119,9 @@ addCol('orders', 'coupon_code', 'TEXT');
 addCol('orders', 'discount', 'INTEGER NOT NULL DEFAULT 0');
 addCol('orders', 'shipping_note', "TEXT NOT NULL DEFAULT 'Order received, preparing for dispatch'");
 addCol('orders', 'tracking_note', "TEXT NOT NULL DEFAULT 'Order received'");
+// Replies thread to the message they answer, so a reply to a guest contact
+// message is never an orphaned row: parent_id always points at the original.
+addCol('messages', 'parent_id', 'INTEGER REFERENCES messages(id)');
 
 const ADMIN_SALT = 'b8dcbe157e80f38cedb208d2b3af8927';
 const ADMIN_HASH = 'a6ccffb0b5994fbc904f3ac877a8f6d4d20aa57292981cd94bb96e5c3a3ca670';
@@ -286,6 +301,11 @@ function authPortal(req) {
 function requireCsrf(req, session) { return session && req.headers['x-csrf-token'] === session.csrf_token; }
 const PKR = (n) => 'PKR ' + Number(n).toLocaleString('en-PK');
 const TRACKING = { 'Pending': 'Order received', 'In Route': 'Your order is on its way', 'Shipped': 'Order shipped', 'Delivered': 'Order delivered' };
+// Order status only moves forward along the pipeline (same status re-PUT is
+// a harmless no-op). Moving backwards would rewrite history the customer
+// already saw on their tracking timeline.
+const ORDER_STAGES = ['Pending', 'In Route', 'Shipped', 'Delivered'];
+function statusMovesForward(from, to) { return ORDER_STAGES.indexOf(to) >= ORDER_STAGES.indexOf(from); }
 function orderWithItems(o) {
   const customer = db.prepare('SELECT * FROM customers WHERE id=?').get(o.customer_id);
   const items = db.prepare('SELECT * FROM order_items WHERE order_id=?').all(o.id);
@@ -414,8 +434,12 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/contact' && req.method === 'POST') {
       const b = await readBody(req);
       if (!b || !b.name || !b.message || String(b.message).length < 10) return json(res, 400, { error: 'Name and a message of at least 10 characters are required' });
-      const r = db.prepare('INSERT INTO messages (user_id,sender_role,sender_name,subject,body) VALUES (NULL,?,?,?,?)')
-        .run('customer', b.name.trim(), (b.subject || 'Contact form').trim(), b.message.trim());
+      // A signed-in customer writing via the contact form keeps their user
+      // id on the message, so the admin's reply reaches their portal inbox
+      // instead of landing on a NULL (guest) row no customer can ever see.
+      const portal = authPortal(req); const portalUser = portal && portal.user.status === 'active' ? portal.user : null;
+      const r = db.prepare('INSERT INTO messages (user_id,sender_role,sender_name,subject,body) VALUES (?,?,?,?,?)')
+        .run(portalUser ? portalUser.id : null, 'customer', b.name.trim(), (b.subject || 'Contact form').trim(), b.message.trim());
       return json(res, 201, { id: r.lastInsertRowid, message: 'Message sent. Our support team will reply here in-site (no email is sent).' });
     }
     // ---- portal auth ----
@@ -587,6 +611,7 @@ const server = http.createServer(async (req, res) => {
         if (!ok) return json(res, 400, { error: 'Invalid status' });
         const id = p.split('/')[4]; const row = db.prepare('SELECT * FROM orders WHERE id=?').get(id);
         if (!row) return json(res, 404, { error: 'Order not found' });
+        if (!statusMovesForward(row.status, b.status)) return json(res, 400, { error: `Order status cannot move backwards (${row.status} -> ${b.status})` });
         db.prepare('UPDATE orders SET status=?, tracking_note=?, shipping_note=? WHERE id=?').run(b.status, TRACKING[b.status], b.status === 'Delivered' ? 'Order delivered' : 'Order in progress', id);
         audit(u.name, 'manager_order_status', 'order:' + id, `${row.status} -> ${b.status}`);
         return json(res, 200, { ok: true });
@@ -619,8 +644,8 @@ const server = http.createServer(async (req, res) => {
         if (!requireCsrf(req, s)) return json(res, 403, { error: 'Invalid CSRF token' });
         const b = await readBody(req); const orig = db.prepare('SELECT * FROM messages WHERE id=?').get(p.split('/')[4]);
         if (!orig || !b || !b.body) return json(res, 400, { error: 'Original message and reply text are required' });
-        const r = db.prepare('INSERT INTO messages (user_id,sender_role,sender_name,subject,body,order_id,product_id) VALUES (?,?,?,?,?,?,?)')
-          .run(orig.user_id, 'manager', u.name, 'Re: ' + (orig.subject || 'Support message'), b.body.trim(), orig.order_id, orig.product_id);
+        const r = db.prepare('INSERT INTO messages (user_id,sender_role,sender_name,subject,body,order_id,product_id,parent_id) VALUES (?,?,?,?,?,?,?,?)')
+          .run(orig.user_id, 'manager', u.name, 'Re: ' + (orig.subject || 'Support message'), b.body.trim(), orig.order_id, orig.product_id, orig.id);
         db.prepare('UPDATE messages SET is_read=1 WHERE id=?').run(orig.id);
         return json(res, 201, { id: r.lastInsertRowid });
       }
@@ -628,6 +653,12 @@ const server = http.createServer(async (req, res) => {
     }
     // ---- checkout (guest or logged-in, with coupon) ----
     if (p === '/api/checkout' && req.method === 'POST') {
+      // CSRF applies when a portal session rides along: a signed-in customer
+      // tricked into checking out on a hostile page would otherwise place
+      // an order with the attacker's items/address. Guests carry no session
+      // to ride, so no token exists to check — they proceed without one.
+      const portalEarly = authPortal(req);
+      if (portalEarly && !requireCsrf(req, portalEarly)) return json(res, 403, { error: 'Invalid CSRF token' });
       const b = await readBody(req);
       if (!b || !b.name || !b.phone || !b.address || !b.city || !Array.isArray(b.items) || !b.items.length)
         return json(res, 400, { error: 'Name, phone, address, city and at least one item are required' });
@@ -638,7 +669,7 @@ const server = http.createServer(async (req, res) => {
         if (!c) return json(res, 400, { error: 'Coupon not found or inactive' });
         couponCode = c.code; discount = Math.round(v.subtotal * c.percent / 100);
       }
-      const portal = authPortal(req); const portalUser = portal && portal.user.status === 'active' ? portal.user : null;
+      const portal = portalEarly; const portalUser = portal && portal.user.status === 'active' ? portal.user : null;
       const existing = db.prepare('SELECT * FROM customers WHERE phone=?').get(b.phone.trim());
       const c = existing || db.prepare('INSERT INTO customers (name,phone,address,city) VALUES (?,?,?,?)').run(b.name.trim(), b.phone.trim(), b.address.trim(), b.city.trim());
       const customerId = existing ? existing.id : c.lastInsertRowid;
@@ -709,6 +740,7 @@ const server = http.createServer(async (req, res) => {
         if (!ok) return json(res, 400, { error: 'Invalid status' });
         const id = p.split('/')[4]; const row = db.prepare('SELECT * FROM orders WHERE id=?').get(id);
         if (!row) return json(res, 404, { error: 'Order not found' });
+        if (!statusMovesForward(row.status, b.status)) return json(res, 400, { error: `Order status cannot move backwards (${row.status} -> ${b.status})` });
         db.prepare('UPDATE orders SET status=?, tracking_note=?, shipping_note=? WHERE id=?').run(b.status, TRACKING[b.status], b.status === 'Delivered' ? 'Order delivered' : 'Order in progress', id);
         audit(s.name, 'order_status', 'order:' + id, `${row.status} -> ${b.status}`); return json(res, 200, { ok: true });
       }
@@ -738,7 +770,7 @@ const server = http.createServer(async (req, res) => {
         if (!requireCsrf(req, s)) return json(res, 403, { error: 'Invalid CSRF token' });
         const b = await readBody(req); const orig = db.prepare('SELECT * FROM messages WHERE id=?').get(p.split('/')[4]);
         if (!orig || !b || !b.body) return json(res, 400, { error: 'Original message and reply text are required' });
-        const r = db.prepare('INSERT INTO messages (user_id,sender_role,sender_name,subject,body,order_id,product_id) VALUES (?,?,?,?,?,?,?)').run(orig.user_id, 'admin', s.name, 'Re: ' + (orig.subject || 'Support message'), b.body.trim(), orig.order_id, orig.product_id);
+        const r = db.prepare('INSERT INTO messages (user_id,sender_role,sender_name,subject,body,order_id,product_id,parent_id) VALUES (?,?,?,?,?,?,?,?)').run(orig.user_id, 'admin', s.name, 'Re: ' + (orig.subject || 'Support message'), b.body.trim(), orig.order_id, orig.product_id, orig.id);
         db.prepare('UPDATE messages SET is_read=1 WHERE id=?').run(orig.id);
         audit(s.name, 'message_replied', 'message:' + orig.id, ''); return json(res, 201, { id: r.lastInsertRowid });
       }
@@ -794,4 +826,6 @@ const server = http.createServer(async (req, res) => {
     fs.createReadStream(full).pipe(res);
   } catch (e) { console.error(e); if (!res.headersSent) json(res, 500, { error: 'Server error' }); }
 });
-server.listen(PORT, () => console.log(`Ciral running on http://127.0.0.1:${PORT}`));
+if (require.main === module) server.listen(PORT, () => console.log(`Ciral running on http://127.0.0.1:${PORT}`));
+// Exported for tests only (writable-dir fallback unit check in test.js).
+module.exports = { writableBase };

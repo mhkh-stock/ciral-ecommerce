@@ -27,14 +27,14 @@ server listens on `$PORT` automatically.
 ## Tests
 
 ```bash
-node test.js   # fresh-DB end-to-end suite, 107 checks, dummy accounts only
+node test.js   # fresh-DB end-to-end suite, 120 checks, dummy accounts only
 ```
 
 `test.js` boots the server as a child process on port 3101 with a throwaway
 database under `/tmp`, exercises the public API, checkout pricing, roles,
 CSRF, messaging scoping, manager/admin flows and login rate limiting, then
 kills the server by PID. It exits non-zero if any check fails. Last full run
-(2026-11-07): **107/107 pass**.
+(2026-11-07): **120/120 pass**.
 
 ## Portals — what each one does
 
@@ -69,13 +69,16 @@ inbox with unread counts, open a thread and reply; the customer sees the
 reply in their portal. **In-site messaging only — no email or SMS is sent
 or claimed.**
 
-## Logins (demo — change after first login)
+## Logins
 
-- Admin: M. Hashir — mhkh3200@gmail.com — Hashir@123 (Change Password in admin panel)
-- Manager (seeded, active): Sara Manager — manager@ciral.pk — Manager@2026!
-- Customer (seeded): Test Customer — customer@ciral.pk — Customer@2026!
-- New manager registrations start pending; the admin activates them under
-  Users in the admin panel.
+- Admin: M. Hashir — mhkh3200@gmail.com (Change Password in admin panel)
+- Manager (seeded, active): Sara Manager — manager@ciral.pk
+- Customer (seeded): Test Customer — customer@ciral.pk
+- Seeded accounts are created with random passwords on first run; the admin
+  sets/rotates them from the admin panel (Users → create, or Change
+  Password). **No password is published in this repo — never paste one
+  into docs, screenshots or chat.** New manager registrations start
+  pending; the admin activates them under Users in the admin panel.
 
 ## Honest limits
 
@@ -85,7 +88,7 @@ or claimed.**
 - Product gallery images are generic category placeholders, not photos of
   the exact product. Product art in listings is one illustration per product.
 - Seed data is realistic Pakistani data; no "demo"/"AI" labels in the UI.
-- Full feature list: see `FEATURES.md`. Full test run: **107/107 checks pass
+- Full feature list: see `FEATURES.md`. Full test run: **120/120 checks pass
   on a fresh database — run it yourself with `node test.js`**.
 - Deals of the Day auto-renew: when the current deals expire, the same three
   deals are re-created for the next 24 hours, so the section never goes

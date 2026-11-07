@@ -65,7 +65,10 @@ Every portal and feature the site must have. Status is before the v3 build
 Every "Missing" / "Partial" row above is now implemented and tested:
 107/107 checks pass on a fresh database (`node test.js`, 2026-11-07 — the
 suite lives in the repo; the old 61/61 figure was from an ad-hoc run with no
-saved test file), plus a separate manager-reply check (201). Engaging storefront additions
+saved test file), plus a separate manager-reply check (201). A second
+hardening round (2026-11-07) took it to **120/120**: order status can only
+move forward, contact replies thread to their original, CSRF on logged-in
+checkout, and a writable-dir fallback for read-only hosts. Engaging storefront additions
 (deals, best sellers, new arrivals, categories, recommendations, search
 suggestions, detail gallery, related products, star ratings, checkout
 progress, tracking timeline) are all driven by real data — see README.
