@@ -132,7 +132,24 @@ if (!db.prepare('SELECT id FROM coupons WHERE code=?').get('WELCOME10')) {
   db.prepare('INSERT INTO coupons (code,percent,active) VALUES (?,?,1)').run('WELCOME10', 10);
 }
 // Deals of the Day: real prices that actually apply at checkout (see validateItems).
+// Deals last 24h and AUTO-RENEW: whenever no deal is still active (e.g. the
+// previous day's deals expired), the same three deals are re-created for the
+// next 24h, so "Deals of the Day" is never an empty section. No admin UI is
+// needed to keep deals alive; editing the deal list means editing DEAL_SPECS.
 // Gallery images are generic category placeholders, NOT photos of the exact product.
+const DEAL_SPECS = [['Wireless Earbuds', 0.20], ["Men's Premium Cotton Kurta", 0.15], ['Ceramic Dinner Set', 0.25]];
+function ensureDeals() {
+  const prods = db.prepare('SELECT * FROM products ORDER BY id').all();
+  if (!prods.length) return;
+  const active = db.prepare("SELECT COUNT(*) c FROM deals WHERE active=1 AND datetime(ends_at) > datetime('now')").get().c;
+  if (active > 0) return;
+  const ends = new Date(Date.now() + 86400000).toISOString().slice(0, 19).replace('T', ' ');
+  const ins = db.prepare('INSERT INTO deals (product_id,deal_price,label,ends_at,active) VALUES (?,?,?,?,1)');
+  for (const [startsWith, pct] of DEAL_SPECS) {
+    const pr = prods.find(p => p.name.startsWith(startsWith));
+    if (pr) ins.run(pr.id, Math.round(pr.price * (1 - pct)), 'Deal of the Day', ends);
+  }
+}
 const CAT_IMAGES = {
   'Clothing': ['https://images.unsplash.com/photo-1523381210434-271e8be1f52b?w=800', 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800'],
   'Footwear': ['https://images.unsplash.com/photo-1549298916-b41d501d3772?w=800', 'https://images.unsplash.com/photo-1560769629-975ec94e6a86?w=800'],
@@ -140,15 +157,10 @@ const CAT_IMAGES = {
   'Home': ['https://images.unsplash.com/photo-1556911220-bff31c812dba?w=800', 'https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=800'],
 };
 function seedDealsAndImages() {
-  const prods = db.prepare('SELECT * FROM products ORDER BY id').all();
-  if (!prods.length) return;
-  if (!db.prepare('SELECT id FROM deals LIMIT 1').get()) {
-    const ends = new Date(Date.now() + 86400000).toISOString().slice(0, 19).replace('T', ' ');
-    const dealFor = (startsWith, pct) => { const pr = prods.find(p => p.name.startsWith(startsWith)); if (pr) db.prepare('INSERT INTO deals (product_id,deal_price,label,ends_at,active) VALUES (?,?,?,?,1)').run(pr.id, Math.round(pr.price * (1 - pct)), 'Deal of the Day', ends); };
-    dealFor('Wireless Earbuds', 0.20); dealFor('Men\'s Premium Cotton Kurta', 0.15); dealFor('Ceramic Dinner Set', 0.25);
-  }
+  ensureDeals();
   if (!db.prepare('SELECT id FROM product_images LIMIT 1').get()) {
     const ins = db.prepare('INSERT INTO product_images (product_id,url,label,sort_order) VALUES (?,?,?,?)');
+    const prods = db.prepare('SELECT * FROM products ORDER BY id').all();
     for (const pr of prods) { const imgs = CAT_IMAGES[pr.category] || CAT_IMAGES['Home']; ins.run(pr.id, imgs[0], 'Product view', 0); ins.run(pr.id, imgs[1], 'Lifestyle view', 1); }
   }
 }
@@ -229,7 +241,23 @@ if (!db.prepare('SELECT id FROM reviews LIMIT 1').get()) {
 seedDealsAndImages();
 
 // ---- helpers ----
-function json(res, code, obj) { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); }
+const SEC_HEADERS = { 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'SAMEORIGIN', 'Referrer-Policy': 'no-referrer' };
+function json(res, code, obj) { res.writeHead(code, { 'Content-Type': 'application/json', ...SEC_HEADERS }); res.end(JSON.stringify(obj)); }
+// Login rate limiting (in-memory): 20 failed attempts per email per 10 min,
+// then 429 until the window passes. Success clears the counter. Generous on
+// purpose — it stops password guessing, not a mistyped password or two.
+const loginFails = new Map();
+function loginBlocked(key) {
+  const e = loginFails.get(key); if (!e) return false;
+  if (Date.now() - e.firstAt > 10 * 60 * 1000) { loginFails.delete(key); return false; }
+  return e.count >= 20;
+}
+function loginFailed(key) {
+  const e = loginFails.get(key);
+  if (!e || Date.now() - e.firstAt > 10 * 60 * 1000) loginFails.set(key, { count: 1, firstAt: Date.now() });
+  else e.count++;
+}
+function loginOk(key) { loginFails.delete(key); }
 function readBody(req) {
   return new Promise((resolve) => {
     let s = ''; req.on('data', c => { s += c; if (s.length > 1e6) req.destroy(); });
@@ -267,6 +295,12 @@ function createOrder(customerId, userId, body, lines, subtotal, discount, coupon
   const pay = ['Cash on Delivery', 'Bank Transfer', 'JazzCash', 'Easypaisa'].includes(body.payment_method) ? body.payment_method : 'Cash on Delivery';
   db.exec('BEGIN IMMEDIATE');
   try {
+    // Re-check stock INSIDE the transaction: validateItems ran before it, so
+    // two simultaneous checkouts could otherwise both pass and oversell.
+    for (const [prod, q] of lines) {
+      const cur = db.prepare('SELECT stock FROM products WHERE id=?').get(prod.id);
+      if (!cur || cur.stock < q) { db.exec('ROLLBACK'); return null; }
+    }
     const o = db.prepare('INSERT INTO orders (customer_id,user_id,total,payment_method,status,coupon_code,discount,shipping_note,tracking_note) VALUES (?,?,?,?,?,?,?,?,?)')
       .run(customerId, userId || null, subtotal - discount, pay, 'Pending', couponCode || null, discount, 'Order received, preparing for dispatch', TRACKING['Pending']);
     const ins = db.prepare('INSERT INTO order_items (order_id,product_id,name,price,qty) VALUES (?,?,?,?,?)');
@@ -276,11 +310,20 @@ function createOrder(customerId, userId, body, lines, subtotal, discount, coupon
   } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
 function validateItems(items) {
-  let subtotal = 0; const lines = [];
+  // Aggregate duplicate lines for the same product FIRST: two lines of 3
+  // against stock 5 must fail (3+3 > 5), not pass line-by-line and drive
+  // stock to -1. Prices are always re-read from the DB here — a client-sent
+  // price is never trusted.
+  const qtyByProduct = new Map();
   for (const it of items) {
     const prod = db.prepare('SELECT * FROM products WHERE id=?').get(Number(it.product_id));
     const qty = Number(it.qty);
     if (!prod || !Number.isInteger(qty) || qty < 1) return { error: 'Invalid item in cart' };
+    qtyByProduct.set(prod.id, (qtyByProduct.get(prod.id) || 0) + qty);
+  }
+  let subtotal = 0; const lines = [];
+  for (const [pid, qty] of qtyByProduct) {
+    const prod = db.prepare('SELECT * FROM products WHERE id=?').get(pid);
     if (prod.stock < qty) return { error: `Only ${prod.stock} left in stock for ${prod.name}` };
     // Deal price is the real charged price when an active deal exists.
     const charged = { ...prod, price: effectivePrice(prod) };
@@ -331,6 +374,7 @@ const server = http.createServer(async (req, res) => {
     }
     // ---- engaging storefront: all from real data ----
     if (p === '/api/deals' && req.method === 'GET') {
+      ensureDeals(); // renew the day's deals if yesterday's have expired
       const rows = db.prepare("SELECT d.*, p.name, p.category, p.price, p.stock, p.description, p.image_emoji FROM deals d JOIN products p ON p.id=d.product_id WHERE d.active=1 AND datetime(d.ends_at) > datetime('now') ORDER BY d.id").all();
       return json(res, 200, rows);
     }
@@ -390,8 +434,11 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/auth/login' && req.method === 'POST') {
       const b = await readBody(req);
-      const user = db.prepare('SELECT * FROM users WHERE email=?').get((b && b.email || '').trim());
-      if (!user || !safeEqual(hashPw(b.password || '', user.salt), user.password_hash)) return json(res, 401, { error: 'Invalid email or password' });
+      const email = (b && b.email || '').trim();
+      if (loginBlocked('portal:' + email.toLowerCase())) return json(res, 429, { error: 'Too many failed sign-in attempts. Please wait a few minutes and try again.' });
+      const user = db.prepare('SELECT * FROM users WHERE email=?').get(email);
+      if (!user || !safeEqual(hashPw(b.password || '', user.salt), user.password_hash)) { loginFailed('portal:' + email.toLowerCase()); return json(res, 401, { error: 'Invalid email or password' }); }
+      loginOk('portal:' + email.toLowerCase());
       if (user.status === 'suspended') return json(res, 403, { error: 'Account suspended. Contact support.' });
       if (user.status === 'pending') return json(res, 403, { error: 'Account pending admin approval. Please wait for approval.' });
       const token = crypto.randomBytes(32).toString('hex'), csrf = crypto.randomBytes(16).toString('hex');
@@ -447,6 +494,7 @@ const server = http.createServer(async (req, res) => {
         const v = validateItems(items); if (v.error) return json(res, 400, { error: v.error });
         const cust = db.prepare('SELECT * FROM customers WHERE id=?').get(old.customer_id);
         const nid = createOrder(old.customer_id, u.id, { payment_method: old.payment_method }, v.lines, v.subtotal, 0, null);
+        if (!nid) return json(res, 400, { error: 'An item in this order just sold out — please review the product and try again' });
         audit(u.name, 'order_reordered', 'order:' + nid, 'Reordered from #' + old.id);
         return json(res, 201, { order_id: nid, total: v.subtotal, customer: cust });
       }
@@ -465,7 +513,8 @@ const server = http.createServer(async (req, res) => {
         return r.changes ? json(res, 200, { ok: true }) : json(res, 404, { error: 'Address not found' });
       }
       if (p === '/api/wishlist' && req.method === 'GET') {
-        return json(res, 200, db.prepare('SELECT w.*, p.name, p.price, p.category, p.image_emoji FROM wishlist w JOIN products p ON p.id=w.product_id WHERE w.user_id=? ORDER BY w.id DESC').all(u.id));
+        return json(res, 200, db.prepare('SELECT w.*, p.name, p.price, p.category, p.image_emoji FROM wishlist w JOIN products p ON p.id=w.product_id WHERE w.user_id=? ORDER BY w.id DESC').all(u.id)
+          .map(w => { const d = activeDeal(w.product_id); return { ...w, deal_price: d ? d.deal_price : null }; }));
       }
       if (p === '/api/wishlist' && req.method === 'POST') {
         if (!requireCsrf(req, s)) return json(res, 403, { error: 'Invalid CSRF token' });
@@ -480,7 +529,7 @@ const server = http.createServer(async (req, res) => {
         return json(res, 200, { ok: true });
       }
       if (p === '/api/reviews' && req.method === 'POST') {
-        if (u.role !== 'customer' && u.role !== 'manager') return json(res, 403, { error: 'Customers only' });
+        if (u.role !== 'customer') return json(res, 403, { error: 'Customers only' });
         if (!requireCsrf(req, s)) return json(res, 403, { error: 'Invalid CSRF token' });
         const b = await readBody(req); const rating = Number(b && b.rating);
         if (!b || !Number.isInteger(rating) || rating < 1 || rating > 5) return json(res, 400, { error: 'Rating 1–5 is required' });
@@ -498,6 +547,11 @@ const server = http.createServer(async (req, res) => {
         if (!requireCsrf(req, s)) return json(res, 403, { error: 'Invalid CSRF token' });
         const b = await readBody(req);
         if (!b || !b.body || String(b.body).trim().length < 3) return json(res, 400, { error: 'Message text is required' });
+        // A message may only link to the sender's OWN order / a real product.
+        if (b.order_id && !db.prepare('SELECT id FROM orders WHERE id=? AND user_id=?').get(Number(b.order_id), u.id))
+          return json(res, 400, { error: 'Order not found' });
+        if (b.product_id && !db.prepare('SELECT id FROM products WHERE id=?').get(Number(b.product_id)))
+          return json(res, 400, { error: 'Product not found' });
         const r = db.prepare('INSERT INTO messages (user_id,sender_role,sender_name,subject,body,order_id,product_id) VALUES (?,?,?,?,?,?,?)')
           .run(u.id, u.role, u.name, (b.subject || 'Support message').trim(), b.body.trim(), b.order_id ? Number(b.order_id) : null, b.product_id ? Number(b.product_id) : null);
         return json(res, 201, { id: r.lastInsertRowid });
@@ -589,16 +643,20 @@ const server = http.createServer(async (req, res) => {
       const c = existing || db.prepare('INSERT INTO customers (name,phone,address,city) VALUES (?,?,?,?)').run(b.name.trim(), b.phone.trim(), b.address.trim(), b.city.trim());
       const customerId = existing ? existing.id : c.lastInsertRowid;
       const oid = createOrder(customerId, portalUser ? portalUser.id : null, b, v.lines, v.subtotal, discount, couponCode);
+      if (!oid) return json(res, 400, { error: 'An item in your cart just sold out — please review your cart and try again' });
       audit(portalUser ? portalUser.name : 'Storefront', 'order_created', 'order:' + oid, `${b.name} — ${PKR(v.subtotal - discount)} via ${b.payment_method || 'Cash on Delivery'}`);
       return json(res, 201, { order_id: oid, total: v.subtotal - discount, discount, coupon: couponCode });
     }
     // admin auth
     if (p === '/api/admin/login' && req.method === 'POST') {
       const b = await readBody(req); if (!b) return json(res, 400, { error: 'Invalid body' });
-      const user = db.prepare('SELECT * FROM admin_users WHERE email=?').get((b.email || '').trim());
-      if (!user) return json(res, 401, { error: 'Invalid email or password' });
+      const email = (b.email || '').trim();
+      if (loginBlocked('admin:' + email.toLowerCase())) return json(res, 429, { error: 'Too many failed sign-in attempts. Please wait a few minutes and try again.' });
+      const user = db.prepare('SELECT * FROM admin_users WHERE email=?').get(email);
+      if (!user) { loginFailed('admin:' + email.toLowerCase()); return json(res, 401, { error: 'Invalid email or password' }); }
       const h = crypto.pbkdf2Sync(b.password || '', user.salt, 210000, 32, 'sha256').toString('hex');
-      if (!safeEqual(h, user.password_hash)) return json(res, 401, { error: 'Invalid email or password' });
+      if (!safeEqual(h, user.password_hash)) { loginFailed('admin:' + email.toLowerCase()); return json(res, 401, { error: 'Invalid email or password' }); }
+      loginOk('admin:' + email.toLowerCase());
       const token = crypto.randomBytes(32).toString('hex'), csrf = crypto.randomBytes(16).toString('hex');
       const exp = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 19).replace('T', ' ');
       db.prepare('INSERT INTO admin_sessions (admin_id,token_hash,csrf_token,expires_at) VALUES (?,?,?,?)').run(user.id, hashToken(token), csrf, exp);
@@ -732,7 +790,7 @@ const server = http.createServer(async (req, res) => {
     if (!full.startsWith(PUBLIC_DIR) || !fs.existsSync(full) || fs.statSync(full).isDirectory()) return json(res, 404, { error: 'Not found' });
     const ext = path.extname(full);
     const types = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.json': 'application/json' };
-    res.writeHead(200, { 'Content-Type': types[ext] || 'text/plain' });
+    res.writeHead(200, { 'Content-Type': types[ext] || 'text/plain', ...SEC_HEADERS });
     fs.createReadStream(full).pipe(res);
   } catch (e) { console.error(e); if (!res.headersSent) json(res, 500, { error: 'Server error' }); }
 });

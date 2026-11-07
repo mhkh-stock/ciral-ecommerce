@@ -1,4 +1,7 @@
 let token=localStorage.getItem('ciral_portal_token')||'', csrf=localStorage.getItem('ciral_portal_csrf')||'', me=null;
+// Escape user-supplied text before innerHTML (stored XSS: customer names,
+// message bodies all come from other users' input).
+function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.style.display='block'; setTimeout(()=>t.style.display='none',3500); }
 function pkr(n){ return 'PKR '+Number(n).toLocaleString('en-PK'); }
 function showTab(id,el){ document.querySelectorAll('section').forEach(s=>s.style.display='none'); document.getElementById(id).style.display='block'; document.querySelectorAll('.sidebar a').forEach(a=>a.classList.remove('active')); if(el) el.classList.add('active'); }
@@ -12,14 +15,14 @@ async function loadAll(){
   const sum=await api('/api/manager/summary');
   document.getElementById('summary').innerHTML=`<p>Orders: ${sum.orders} · Revenue: ${pkr(sum.revenue)} · Delivered revenue: ${pkr(sum.delivered_revenue)} · Products: ${sum.products} · Customers: ${sum.customers} · Unread customer messages: ${sum.unread_messages}</p>`+sum.by_status.map(s=>`<p>${s.status}: ${s.c}</p>`).join('');
   const prods=await api('/api/manager/products');
-  document.getElementById('productsList').innerHTML=prods.map(p=>`<p>${p.image_emoji} ${p.name} — ${pkr(p.price)} — Stock ${p.stock} <button class="small ghost" onclick="editProduct(${p.id},${p.price},${p.stock})">Edit Price/Stock</button></p>`).join('');
+  document.getElementById('productsList').innerHTML=prods.map(p=>`<p>${esc(p.image_emoji)} ${esc(p.name)} — ${pkr(p.price)} — Stock ${p.stock} <button class="small ghost" onclick="editProduct(${p.id},${p.price},${p.stock})">Edit Price/Stock</button></p>`).join('');
   const orders=await api('/api/manager/orders');
-  document.getElementById('ordersList').innerHTML=orders.map(o=>`<p>#${o.id} — ${o.customer.name} — ${pkr(o.total)} — <b>${o.status}</b> <select onchange="moveOrder(${o.id},this.value)"><option value="">Move to…</option>${STAGES.map(s=>`<option>${s}</option>`).join('')}</select></p>`).join('');
+  document.getElementById('ordersList').innerHTML=orders.map(o=>`<p>#${o.id} — ${esc(o.customer.name)} — ${pkr(o.total)} — <b>${esc(o.status)}</b> <select onchange="moveOrder(${o.id},this.value)"><option value="">Move to…</option>${STAGES.map(s=>`<option>${s}</option>`).join('')}</select></p>`).join('');
   const custs=await api('/api/manager/customers');
-  document.getElementById('customersList').innerHTML=custs.map(c=>`<p>${c.name} — ${c.phone} — ${c.city}</p>`).join('');
+  document.getElementById('customersList').innerHTML=custs.map(c=>`<p>${esc(c.name)} — ${esc(c.phone)} — ${esc(c.city)}</p>`).join('');
   const msgs=await api('/api/manager/messages');
   document.getElementById('unreadBadge').textContent=msgs.unread?`(${msgs.unread} unread)`:'' ;
-  document.getElementById('msgList').innerHTML=msgs.messages.map(m=>`<p><b>${m.sender_role}: ${m.sender_name}</b> — ${m.subject} — ${m.body} <input id="rep${m.id}" placeholder="Reply..."><button class="small ghost" onclick="replyMsg(${m.id})">Reply</button></p>`).join('')||'<p>No messages yet.</p>';
+  document.getElementById('msgList').innerHTML=msgs.messages.map(m=>`<p><b>${esc(m.sender_role)}: ${esc(m.sender_name)}</b> — ${esc(m.subject)} — ${esc(m.body)} <input id="rep${m.id}" placeholder="Reply..."><button class="small ghost" onclick="replyMsg(${m.id})">Reply</button></p>`).join('')||'<p>No messages yet.</p>';
 }
 async function addProduct(){ try{ await api('/api/manager/products',{method:'POST',body:JSON.stringify({name:document.getElementById('npName').value,category:document.getElementById('npCat').value,price:document.getElementById('npPrice').value,stock:document.getElementById('npStock').value,description:document.getElementById('npDesc').value})}); toast('Product added'); await loadAll(); }catch(e){ toast(e.message); } }
 async function editProduct(id,price,stock){ const np=prompt('New price (PKR)',price); const ns=prompt('New stock',stock); if(np===null||ns===null) return; try{ await api('/api/manager/products/'+id,{method:'PUT',body:JSON.stringify({price:np,stock:ns})}); toast('Product updated'); await loadAll(); }catch(e){ toast(e.message); } }

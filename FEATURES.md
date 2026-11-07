@@ -63,8 +63,9 @@ Every portal and feature the site must have. Status is before the v3 build
 ## After v3 build — all ✅
 
 Every "Missing" / "Partial" row above is now implemented and tested:
-61/61 checks pass on a fresh database (fresh-DB end-to-end run, 2026-11-03),
-plus a separate manager-reply check (201). Engaging storefront additions
+107/107 checks pass on a fresh database (`node test.js`, 2026-11-07 — the
+suite lives in the repo; the old 61/61 figure was from an ad-hoc run with no
+saved test file), plus a separate manager-reply check (201). Engaging storefront additions
 (deals, best sellers, new arrivals, categories, recommendations, search
 suggestions, detail gallery, related products, star ratings, checkout
 progress, tracking timeline) are all driven by real data — see README.

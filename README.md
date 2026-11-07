@@ -24,6 +24,18 @@ Port 3020 by default (does not clash with FoodScope on 3010). Override with
 run and is git-ignored. On a public host (Render, see `render.yaml`) the
 server listens on `$PORT` automatically.
 
+## Tests
+
+```bash
+node test.js   # fresh-DB end-to-end suite, 107 checks, dummy accounts only
+```
+
+`test.js` boots the server as a child process on port 3101 with a throwaway
+database under `/tmp`, exercises the public API, checkout pricing, roles,
+CSRF, messaging scoping, manager/admin flows and login rate limiting, then
+kills the server by PID. It exits non-zero if any check fails. Last full run
+(2026-11-07): **107/107 pass**.
+
 ## Portals — what each one does
 
 - **Public storefront:** hero banners linking to real categories/deals,
@@ -73,8 +85,12 @@ or claimed.**
 - Product gallery images are generic category placeholders, not photos of
   the exact product. Product art in listings is one illustration per product.
 - Seed data is realistic Pakistani data; no "demo"/"AI" labels in the UI.
-- Full feature list: see `FEATURES.md`. Full test run (v3): 61/61 checks
-  pass on a fresh database (see the test flow in the parent report).
+- Full feature list: see `FEATURES.md`. Full test run: **107/107 checks pass
+  on a fresh database — run it yourself with `node test.js`**.
+- Deals of the Day auto-renew: when the current deals expire, the same three
+  deals are re-created for the next 24 hours, so the section never goes
+  empty. Sign-in is rate-limited (20 failed attempts per email per 10
+  minutes, then 429).
 
 ## APIs (summary)
 

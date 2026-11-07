@@ -1,4 +1,7 @@
 let token=localStorage.getItem('ciral_admin_token')||'', csrf=localStorage.getItem('ciral_admin_csrf')||'', soundOn=true, orders=[];
+// Escape user-supplied text before innerHTML (stored XSS: customer names,
+// addresses, message bodies and audit details all come from other users).
+function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function clickSound(){ if(!soundOn) return; try{ const c=new (window.AudioContext||window.webkitAudioContext)(); const o=c.createOscillator(), g=c.createGain(); o.frequency.value=900; g.gain.setValueAtTime(.08,c.currentTime); g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.08); o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime+.09);}catch(e){} }
 function toggleSound(){ soundOn=!soundOn; document.getElementById('soundState').textContent=soundOn?'On':'Off'; }
 function playTour(){ if('speechSynthesis' in window){ speechSynthesis.cancel(); const u=new SpeechSynthesisUtterance('Welcome to Ciral. This is your store dashboard. Here you can see total revenue, orders and customers, track sales on the chart, and move orders from Pending to In Route, Shipped and Delivered. You can also add products, view customers, and check reports and the audit log.'); speechSynthesis.speak(u); } else alert('Voice tour is not supported in this browser.'); }
@@ -18,27 +21,27 @@ async function loadAll(){
   animateNumber(document.getElementById('mDelivered'),stats.revenue);
   document.getElementById('mOrders').textContent=stats.orders; document.getElementById('mCustomers').textContent=stats.customers; document.getElementById('mPending').textContent=stats.pending;
   drawChart(stats.daily);
-  document.getElementById('shipping').innerHTML=stats.shipping.map(o=>`<p>🚚 Order #${o.id} — ${o.customer.name}, ${o.customer.city} — ${o.status} — ${pkr(o.total)}</p>`).join('')||'<p>No orders in transit.</p>';
+  document.getElementById('shipping').innerHTML=stats.shipping.map(o=>`<p>🚚 Order #${o.id} — ${esc(o.customer.name)}, ${esc(o.customer.city)} — ${esc(o.status)} — ${pkr(o.total)}</p>`).join('')||'<p>No orders in transit.</p>';
   orders=await api('/api/admin/orders'); renderBoard(); renderOrders();
   const prods=await api('/api/admin/products');
-  document.getElementById('productsList').innerHTML=prods.map(p=>`<p>${p.image_emoji} ${p.name} — ${pkr(p.price)} — Stock ${p.stock} <button class="small ghost" onclick="editProduct(${p.id})">Edit</button> <button class="small ghost" onclick="delProduct(${p.id})">Delete</button></p>`).join('');
+  document.getElementById('productsList').innerHTML=prods.map(p=>`<p>${esc(p.image_emoji)} ${esc(p.name)} — ${pkr(p.price)} — Stock ${p.stock} <button class="small ghost" onclick="editProduct(${p.id})">Edit</button> <button class="small ghost" onclick="delProduct(${p.id})">Delete</button></p>`).join('');
   const custs=await api('/api/admin/customers');
-  document.getElementById('customersList').innerHTML=custs.map(c=>`<p>${c.name} — ${c.phone} — ${c.city}, ${c.address}</p>`).join('');
+  document.getElementById('customersList').innerHTML=custs.map(c=>`<p>${esc(c.name)} — ${esc(c.phone)} — ${esc(c.city)}, ${esc(c.address)}</p>`).join('');
   const rep=await api('/api/admin/reports');
-  document.getElementById('reportsBox').innerHTML=`<p>Total orders: ${rep.total.orders} · Total revenue: ${pkr(rep.total.revenue)}</p><h3>Top products</h3>`+rep.top.map(t=>`<p>${t.name} — ${t.q} sold — ${pkr(t.t)}</p>`).join('')+`<h3>By category</h3>`+rep.categories.map(c=>`<p>${c.category} — ${c.items} items — ${pkr(c.t)}</p>`).join('');
+  document.getElementById('reportsBox').innerHTML=`<p>Total orders: ${rep.total.orders} · Total revenue: ${pkr(rep.total.revenue)}</p><h3>Top products</h3>`+rep.top.map(t=>`<p>${esc(t.name)} — ${t.q} sold — ${pkr(t.t)}</p>`).join('')+`<h3>By category</h3>`+rep.categories.map(c=>`<p>${esc(c.category)} — ${c.items} items — ${pkr(c.t)}</p>`).join('');
   const users=await api('/api/admin/users');
-  document.getElementById('usersList').innerHTML=users.map(u=>`<p>${u.name} — ${u.email} — ${u.role} — <b>${u.status}</b> <button class="small ghost" onclick="setUserStatus(${u.id},'active')">Activate</button> <button class="small ghost" onclick="setUserStatus(${u.id},'suspended')">Suspend</button></p>`).join('');
+  document.getElementById('usersList').innerHTML=users.map(u=>`<p>${esc(u.name)} — ${esc(u.email)} — ${esc(u.role)} — <b>${esc(u.status)}</b> <button class="small ghost" onclick="setUserStatus(${u.id},'active')">Activate</button> <button class="small ghost" onclick="setUserStatus(${u.id},'suspended')">Suspend</button></p>`).join('');
   const msgs=await api('/api/admin/messages');
   document.getElementById('adminUnread').textContent=msgs.unread?`(${msgs.unread} unread)`:'' ;
-  document.getElementById('adminMsgList').innerHTML=msgs.messages.map(m=>`<p><b>${m.sender_role}: ${m.sender_name}</b> — ${m.subject} — ${m.body} <input id="arep${m.id}" placeholder="Reply..."><button class="small ghost" onclick="replyAdminMsg(${m.id})">Reply</button></p>`).join('')||'<p>No messages yet.</p>';
+  document.getElementById('adminMsgList').innerHTML=msgs.messages.map(m=>`<p><b>${esc(m.sender_role)}: ${esc(m.sender_name)}</b> — ${esc(m.subject)} — ${esc(m.body)} <input id="arep${m.id}" placeholder="Reply..."><button class="small ghost" onclick="replyAdminMsg(${m.id})">Reply</button></p>`).join('')||'<p>No messages yet.</p>';
   const logs=await api('/api/admin/audit');
-  document.getElementById('auditList').innerHTML=logs.map(l=>`<p>${l.created_at} — ${l.admin_name} — ${l.action} — ${l.target} ${l.details}</p>`).join('');
+  document.getElementById('auditList').innerHTML=logs.map(l=>`<p>${esc(l.created_at)} — ${esc(l.admin_name)} — ${esc(l.action)} — ${esc(l.target)} ${esc(l.details)}</p>`).join('');
 }
 function renderBoard(){
   document.getElementById('board').innerHTML=STAGES.map(st=>`<div class="col" data-stage="${st}" ondragover="event.preventDefault()" ondrop="dropCard(event,'${st}')"><h3>${st}</h3>`+
-    orders.filter(o=>o.status===st).map(o=>`<div class="ocol" draggable="true" ondragstart="dragCard(event,${o.id})"><b>#${o.id}</b> ${o.customer.name}<br>${pkr(o.total)} · ${o.payment_method}<br><select onchange="moveOrder(${o.id},this.value)"><option value="">Move to…</option>${STAGES.map(s=>`<option>${s}</option>`).join('')}</select></div>`).join('')+`</div>`).join('');
+    orders.filter(o=>o.status===st).map(o=>`<div class="ocol" draggable="true" ondragstart="dragCard(event,${o.id})"><b>#${o.id}</b> ${esc(o.customer.name)}<br>${pkr(o.total)} · ${esc(o.payment_method)}<br><select onchange="moveOrder(${o.id},this.value)"><option value="">Move to…</option>${STAGES.map(s=>`<option>${s}</option>`).join('')}</select></div>`).join('')+`</div>`).join('');
 }
-function renderOrders(){ document.getElementById('ordersList').innerHTML=orders.map(o=>`<p>#${o.id} — ${o.customer.name} (${o.customer.city}) — ${pkr(o.total)} — ${o.payment_method} — <b>${o.status}</b> <select onchange="moveOrder(${o.id},this.value)"><option value="">Move to…</option>${STAGES.map(s=>`<option>${s}</option>`).join('')}</select></p>`).join(''); }
+function renderOrders(){ document.getElementById('ordersList').innerHTML=orders.map(o=>`<p>#${o.id} — ${esc(o.customer.name)} (${esc(o.customer.city)}) — ${pkr(o.total)} — ${esc(o.payment_method)} — <b>${esc(o.status)}</b> <select onchange="moveOrder(${o.id},this.value)"><option value="">Move to…</option>${STAGES.map(s=>`<option>${s}</option>`).join('')}</select></p>`).join(''); }
 let dragId=null; function dragCard(e,id){ dragId=id; e.target.classList.add('dragging'); }
 async function dropCard(e,st){ e.preventDefault(); if(dragId) await moveOrder(dragId,st); }
 async function moveOrder(id,st){ clickSound(); if(!st) return; try{ await api('/api/admin/orders/'+id+'/status',{method:'PUT',body:JSON.stringify({status:st})}); toast('Order #'+id+' moved to '+st); await loadAll(); }catch(e){ toast(e.message); } }
