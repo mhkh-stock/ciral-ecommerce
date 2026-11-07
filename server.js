@@ -108,8 +108,8 @@ addCol('orders', 'discount', 'INTEGER NOT NULL DEFAULT 0');
 addCol('orders', 'shipping_note', "TEXT NOT NULL DEFAULT 'Order received, preparing for dispatch'");
 addCol('orders', 'tracking_note', "TEXT NOT NULL DEFAULT 'Order received'");
 
-const ADMIN_SALT = '5e62d2e46c4d787b751cfede142cfae9';
-const ADMIN_HASH = '29f231f4e46ec4a94f66ed10eda870636b43bac718628172d8157a0a233f39a5';
+const ADMIN_SALT = 'b8dcbe157e80f38cedb208d2b3af8927';
+const ADMIN_HASH = 'a6ccffb0b5994fbc904f3ac877a8f6d4d20aa57292981cd94bb96e5c3a3ca670';
 if (!db.prepare('SELECT id FROM admin_users WHERE email=?').get('mhkh3200@gmail.com')) {
   db.prepare('INSERT INTO admin_users (name,email,password_hash,salt) VALUES (?,?,?,?)')
     .run('M. Hashir', 'mhkh3200@gmail.com', ADMIN_HASH, ADMIN_SALT);
@@ -126,8 +126,8 @@ function seedUser(name, email, phone, password, role, status) {
     .run(name, email, phone, hashPw(password, salt), salt, role, status);
   return Number(r.lastInsertRowid);
 }
-seedUser('Sara Manager', 'manager@ciral.pk', '0300-1112223', 'Manager@2026!', 'manager', 'active');
-seedUser('Test Customer', 'customer@ciral.pk', '0300-4445556', 'Customer@2026!', 'customer', 'active');
+seedUser('Sara Manager', 'manager@ciral.pk', '0300-1112223', 'FXfIbW1p2lxNKfhg79Gw9eeh', 'manager', 'active');
+seedUser('Test Customer', 'customer@ciral.pk', '0300-4445556', 'DVwhhP40S6cXVj94jImtuW6n', 'customer', 'active');
 if (!db.prepare('SELECT id FROM coupons WHERE code=?').get('WELCOME10')) {
   db.prepare('INSERT INTO coupons (code,percent,active) VALUES (?,?,1)').run('WELCOME10', 10);
 }
